@@ -1,13 +1,13 @@
-import numpy as np
-from tdms_conversion import parseTDMS
+from tdms_conversion import extendDatasets, parseTDMS
 
 from dash import Dash, html, dcc, callback, Output, Input
 import plotly.express as px
 import pandas as pd
 
+# Use the tdms file's functions to get multiple tdms files, then combine them
 channel_data = parseTDMS(
     5,
-    file_path_custom="./cf2/DataLog_2024-0406-1828-28_CMS_Data_Wiring_5.tdms",
+    file_path_custom="./cf2/DataLog_2024-0406-1828-28_CMS_Data_Wiring_5.tdms",  # the "file_path_custom" arg is optional
 )
 channel_data.update(
     parseTDMS(
@@ -15,56 +15,18 @@ channel_data.update(
         file_path_custom="./cf2/DataLog_2024-0406-1828-28_CMS_Data_Wiring_6.tdms",
     )
 )
-
-# get all the available channel names
-available_channels = list(channel_data.keys())
-
-# get the length of the largest dataset
-total_length: int = 0
-for channel in available_channels:
-    if channel != "time" and len(channel_data[channel].data) > total_length:
-        total_length = len(channel_data[channel].data)
-
-# for each channel, pad the end of that channel's dataset with some value to
-# make all the channel's data the same length and simeltaneously convert it all to np arrays
-df_list_constant = {}
-time: list[float] = channel_data["time"]
-df_list_constant.update({"time": np.pad(time, (0, total_length - len(time)), "edge")})
-for channel in available_channels:
-    # for binary channels, make the padding value 0.5 to make it easy to identify which data is to be ignored
-    if "reed-" in channel or "pi-" in channel:
-        df_list_constant.update(
-            {
-                channel: np.pad(
-                    channel_data[channel].data,
-                    (0, total_length - len(channel_data[channel].data)),
-                    "constant",
-                    constant_values=(
-                        0.5,
-                        0.5,
-                    ),
-                )
-            }
-        )
-    # for all other channels, set the padding value to zero
-    elif channel != "time":
-        df_list_constant.update(
-            {
-                channel: np.pad(
-                    channel_data[channel].data,
-                    (0, total_length - len(channel_data[channel].data)),
-                    "constant",
-                    constant_values=(0, 0),
-                )
-            }
-        )
+# after combining, make all the datasets the same length by extending the datasets if necessary
+available_channels, df_list_constant = extendDatasets(channel_data)
 
 
 app = Dash(__name__)
 
 app.layout = html.Div(
     [
-        html.H1(children="Coldflow 2 Data", style={"textAlign": "center", "fontFamily": "sans-serif"}),
+        html.H1(
+            children="Coldflow 2 Data",
+            style={"textAlign": "center", "fontFamily": "sans-serif"},
+        ),
         html.I("scale PI/binary data by: "),
         dcc.Input(
             id="input_{}".format("number"),

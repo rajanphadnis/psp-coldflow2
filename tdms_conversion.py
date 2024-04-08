@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog
 import os
 
+
 class DigitalChannelData:
     def __init__(
         self,
@@ -23,7 +24,7 @@ class DigitalChannelData:
         self._name = name
         self._channel_type = channel_type
         self._description = description
-    
+
     @property
     def data(self) -> NDArray[float64]:
         return self._rawData
@@ -31,18 +32,19 @@ class DigitalChannelData:
     @property
     def properties(self) -> OrderedDict:
         return self._properties
-    
+
     @property
     def name(self) -> str:
         return self._name
-    
+
     @property
     def channelType(self) -> str:
         return self._channel_type
-        
+
     @property
     def description(self) -> str:
         return self._description
+
 
 class AnalogChannelData:
     def __init__(
@@ -84,7 +86,7 @@ class AnalogChannelData:
     @property
     def data(self) -> NDArray[float64]:
         return (self._rawData * self._slope) + self._zeroing_correction + self._offset
-    
+
     @property
     def properties(self) -> OrderedDict:
         return self._properties
@@ -92,19 +94,19 @@ class AnalogChannelData:
     @property
     def name(self) -> str:
         return self._name
-    
+
     @property
     def slope(self) -> float:
         return self._slope
-    
+
     @property
     def offset(self) -> float:
         return self._offset
-    
+
     @property
     def zeroing_target(self) -> float:
         return self._zeroing_target
-    
+
     @property
     def zeroing_correction(self) -> float:
         return self._zeroing_correction
@@ -112,42 +114,53 @@ class AnalogChannelData:
     @property
     def description(self) -> str:
         return self._description
-    
+
     @property
     def units(self) -> str:
         return self._units
-    
+
     @property
     def channelType(self) -> str:
         return self._channel_type
-    
+
     @property
     def constant_cjc(self) -> float:
         return self._constant_cjc
-    
+
     @property
     def tc_type(self) -> str:
         return self._tc_type
-    
+
     @property
     def min_v(self) -> float:
         return self._min_v
-    
+
     @property
     def max_v(self) -> float:
         return self._max_v
-        
+
 
 def parseTDMS(
-    dev_num: int, file_path_custom: str = "",  dev_group: str = "Data (1000.000000 Hz)"
+    dev_num: int, file_path_custom: str = "", dev_group: str = "Data (1000.000000 Hz)"
 ) -> dict[str, AnalogChannelData | DigitalChannelData | list[float]]:
-    if(file_path_custom == ""):
+    """## Parse a TDMS file (or an equivalent pickle file)
+    ### Arguments:
+    - `dev_num` (Type: `int`): dev box number (i.e: the `5` or `6` in dev5 or dev6)
+    - (Optional) `file_path_custom` (Type: `str`): the dynamic file path to a `.TDMS` file (use this in case you don't want to keep selecting the tdms file to parse every time you run the script)
+    - (Optional) `dev_group` (Type: `str`): the TDMS group header. You usually don't have to touch this unless the data isn't high frequency sampling data
+    ### Description
+    If `file_path_custom` isn't specified, the file picker dialog comes up to select a tdms file. Then, we check to see if there's an equivalent pickle file in the same directory as the chosen tdms file.
+    If there's a pickle file, we parse that. Otherwise, we parse the TDMS file and save the resulting object to a pickle file for later.
+    """
+    if file_path_custom == "":
         root = tk.Tk()
         root.withdraw()
         filepath: str = filedialog.askopenfilename(
             initialdir="./", title="Choose Dev" + str(dev_num) + " TDMS file"
         )
-        print(f'to skip the filepicker, use "parseTDMS({dev_num}, file_path_custom={filepath})"')
+        print(
+            f'to skip the filepicker, use "parseTDMS({dev_num}, file_path_custom={filepath})"'
+        )
     else:
         filepath = file_path_custom
     pickle_filepath: str = filepath[:-5] + ".pickle"
@@ -171,7 +184,9 @@ def parseTDMS(
         channel_data_map["time"] = getTime(channel_data_map, dev_group)
         with open(pickle_filepath, "wb") as f:
             pickle.dump(channel_data_map, f, pickle.HIGHEST_PROTOCOL)
-        print(f'conversion done!\n\n\nNext time you want to run the converter, consider calling the function with: "parseTDMS({dev_num}, file_path_custom={pickle_filepath[:-7] + ".tdms"})"')
+        print(
+            f'conversion done!\n\n\nNext time you want to run the converter, consider calling the function with: "parseTDMS({dev_num}, file_path_custom={pickle_filepath[:-7] + ".tdms"})"'
+        )
         return channel_data_map
 
 
@@ -226,5 +241,56 @@ def getTime(
     match: re.Match = re.search(pattern, group_name)
     sample_rate: float = float(match.group(1)[:-3])
     dt: float = 1 / sample_rate
-    time: list[float] = np.arange(0, samples*dt, dt).tolist()
+    time: list[float] = np.arange(0, samples * dt, dt).tolist()
     return time
+
+
+def extendDatasets(
+    channel_data: dict[str, AnalogChannelData | DigitalChannelData | list[float]],
+) -> tuple[list[str], dict[str, AnalogChannelData | DigitalChannelData | list[float]]]:
+    # get all the available channel names
+    available_channels = list(channel_data.keys())
+
+    # get the length of the largest dataset
+    total_length: int = 0
+    for channel in available_channels:
+        if channel != "time" and len(channel_data[channel].data) > total_length:
+            total_length = len(channel_data[channel].data)
+
+    # for each channel, pad the end of that channel's dataset with some value to
+    # make all the channel's data the same length and simeltaneously convert it all to np arrays
+    df_list_constant = {}
+    time: list[float] = channel_data["time"]
+    df_list_constant.update(
+        {"time": np.pad(time, (0, total_length - len(time)), "edge")}
+    )
+    for channel in available_channels:
+        # for binary channels, make the padding value 0.5 to make it easy to identify which data is to be ignored
+        if "reed-" in channel or "pi-" in channel:
+            df_list_constant.update(
+                {
+                    channel: np.pad(
+                        channel_data[channel].data,
+                        (0, total_length - len(channel_data[channel].data)),
+                        "constant",
+                        constant_values=(
+                            0.5,
+                            0.5,
+                        ),
+                    )
+                }
+            )
+        # for all other channels, set the padding value to zero
+        elif channel != "time":
+            df_list_constant.update(
+                {
+                    channel: np.pad(
+                        channel_data[channel].data,
+                        (0, total_length - len(channel_data[channel].data)),
+                        "constant",
+                        constant_values=(0, 0),
+                    )
+                }
+            )
+
+    return (available_channels, df_list_constant)
