@@ -1,0 +1,5 @@
+./venv/
+venv/Lib/site-packages/_brotli.cp311-win_amd64.pyd
+venv/
+
+__pycache__/
